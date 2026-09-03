@@ -1,0 +1,45 @@
+<!-- templates/login.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Member Login</title>
+</head>
+<body>
+    <h1>Member Banking System</h1>
+    
+    <!-- HOSTILE: Table-based layout, no meaningful IDs -->
+    <table border="1" cellpadding="20">
+        <tr>
+            <td>
+                <table border="0">
+                    <tr>
+                        <td class="form_wrapper_xyz123">
+                            <form method="POST" action="/results">
+                                <table>
+                                    <tr>
+                                        <td class="label_cell_abc456">
+                                            <label>Member ID</label>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td class="input_cell_def789">
+                                            <!-- REAL semantic input (has implicit role) -->
+                                            <input type="text" name="member_id" placeholder="Enter Member ID" required>
+                                        </td>
+                                    </tr>
+                                    <tr>
+                                        <td class="button_cell_ghi012">
+                                            <!-- REAL semantic button -->
+                                            <button type="submit" class="submit_btn_jkl345">Search</button>
+                                        </td>
+                                    </tr>
+                                </table>
+                            </form>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>

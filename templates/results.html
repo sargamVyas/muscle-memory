@@ -1,0 +1,19 @@
+<!-- templates/results.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Member Results</title>
+</head>
+<body>
+    <h1>Member Details</h1>
+    <p>Member ID: {{ member_id }}</p>
+    <p>Name: {{ member.name }}</p>
+    <p>Balance: ${{ member.balance }}</p>
+    
+    <form method="POST" action="/action">
+        <input type="hidden" name="member_id" value="{{ member_id }}">
+        <button type="submit" name="action" value="check_balance">Check Balance</button>
+        <button type="submit" name="action" value="withdraw">Withdraw</button>
+    </form>
+</body>
+</html>

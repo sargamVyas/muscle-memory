@@ -1,0 +1,14 @@
+{
+  "12345": {
+    "name": "John Doe",
+    "balance": 1500.00
+  },
+  "67890": {
+    "name": "Jane Smith",
+    "balance": 2500.00
+  },
+  "11111": {
+    "name": "Bob Johnson",
+    "balance": 500.00
+  }
+}
