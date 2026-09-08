@@ -20,6 +20,60 @@ load_dotenv()  # ADD THIS
 # Initialize Anthropic client
 client = Anthropic()
 
+# ========== PROMPTS ==========
+
+SYSTEM_PROMPT = """You are an automation agent that controls a web browser.
+
+Your job is to complete tasks by interacting with web pages.
+
+CRITICAL - DECISION LOGIC:
+1. Look at the form fields
+2. If an input field is EMPTY → type into it
+3. If an input field ALREADY HAS A VALUE → do NOT type again, instead CLICK the Submit/Search button
+4. Never type into a field that already has a value
+
+ACTION TYPES:
+- type: Enter text into an EMPTY input field only
+- click: Click buttons, links, or perform actions
+- navigate: Go to a URL
+- escalate_to_human: If stuck, ask for help
+
+EXAMPLE SCENARIOS:
+Scenario 1: Field is empty, Search button visible
+  → Action: type the value into the field
+
+Scenario 2: Field ALREADY HAS a value like '12345', Search button visible
+  → Action: CLICK the Search button (do NOT type)
+
+Scenario 3: On results page showing member details
+  → Action: CLICK on "Check Balance" to proceed
+
+Always respond ONLY in JSON format:
+{
+  "reasoning": "Why this action",
+  "action_type": "type|click|navigate|escalate_to_human",
+  "target": "Element name",
+  "value": "Text to type (only for type)"
+}"""
+
+USER_PROMPT_TEMPLATE = """Goal: {goal}
+
+Current page state:
+URL: {url}
+Page title: {page_title}
+
+Form fields available:
+{form_fields}
+
+Visible text on page:
+{visible_text}
+
+Interactive elements:
+{interactive_elements}
+
+What should we do next? Respond ONLY with JSON."""
+
+
 # ========== PHASE 1: OBSERVE ==========
 
 def observe_page(page, step_number: int) -> dict:
@@ -69,48 +123,6 @@ def observe_page(page, step_number: int) -> dict:
 
 # ========== PHASE 2: DECIDE ==========
 
-SYSTEM_PROMPT = """You are an automation agent that controls a web browser.
-
-Your job is to complete tasks by interacting with web pages.
-
-You can perform these actions:
-1. type - Type text into an input field
-2. click - Click a button, link, or interactive element
-3. navigate - Navigate to a URL
-4. escalate_to_human - If you're stuck and can't proceed safely
-
-IMPORTANT: Only interact with elements that are visible on the page.
-If you can't find an element or don't know what to do, respond with escalate_to_human.
-
-Always respond in JSON format like this:
-{
-  "reasoning": "Why you chose this action",
-  "action_type": "type|click|navigate|escalate_to_human",
-  "target": "Element name or description",
-  "value": "Value to type (only for type action)",
-  "reason_for_escalation": "Why escalating (only for escalate_to_human)"
-}
-
-Do NOT include any text outside the JSON. Only JSON."""
-
-USER_PROMPT_TEMPLATE = """Goal: {goal}
-
-Current page state:
-URL: {url}
-Page title: {page_title}
-
-Form fields available:
-{form_fields}
-
-Visible text on page:
-{visible_text}
-
-Interactive elements:
-{interactive_elements}
-
-What should we do next? Respond ONLY with JSON."""
-
-
 def extract_response_text(response) -> str:
     """
     Extract text from Claude's response.
@@ -126,22 +138,19 @@ def extract_response_text(response) -> str:
 
 
 def decide_action(goal: str, observation: dict) -> dict:
-    """
-    DECIDE phase: Ask Claude what to do next.
-    
-    Returns action dict like:
-    {
-        "action_type": "type|click|navigate|escalate_to_human",
-        "target": "...",
-        "value": "...",
-        "reasoning": "..."
-    }
-    """
+    """DECIDE phase: Ask Claude what to do next."""
     
     try:
-        # Format the user prompt with observation data
         form_fields_str = format_form_fields(observation['form_fields'])
         interactive_str = format_interactive_elements(observation['interactive_elements'])
+        
+        # Add explicit instruction based on form state
+        extra_instruction = ""
+        for field in observation['form_fields']:
+            if field.get('type') == 'text' and field.get('value'):
+                # Field already has value
+                extra_instruction = "\n⚠️ CRITICAL: The input field ALREADY has a value. DO NOT TYPE. CLICK THE SEARCH BUTTON INSTEAD."
+                break
         
         user_prompt = USER_PROMPT_TEMPLATE.format(
             goal=goal,
@@ -150,7 +159,7 @@ def decide_action(goal: str, observation: dict) -> dict:
             form_fields=form_fields_str,
             visible_text=observation['visible_text'],
             interactive_elements=interactive_str
-        )
+        ) + extra_instruction
         
         # Call Claude
         response = client.messages.create(
@@ -165,13 +174,17 @@ def decide_action(goal: str, observation: dict) -> dict:
             ]
         )
         
-        # Extract response text
         response_text = extract_response_text(response)
-        
-        # Parse JSON
         action = parse_claude_response(response_text)
         
         return action
+        
+    except Exception as e:
+        print(f"Error in decide_action: {e}")
+        return {
+            "action_type": "escalate_to_human",
+            "reason": f"Error calling Claude: {str(e)}"
+        }
         
     except Exception as e:
         print(f"Error in decide_action: {e}")
@@ -239,19 +252,31 @@ def find_element(page, target_description: str) -> tuple:
     Find element using multi-signal resolver.
     
     Tries in order:
-    1. Placeholder text matching
-    2. Accessibility tree (role + name)
-    3. CSS selector
+    1. Placeholder text matching (flexible)
+    2. Button text matching
+    3. Accessibility tree (role + name)
+    4. CSS selector
     
     Returns (element, strategy_used) or (None, 'none')
     """
     
-    # Strategy 1: Find by placeholder text
+    # Extract key words from target (remove common words)
+    target_lower = target_description.lower()
+    key_words = [w for w in target_lower.split() if w not in ['input', 'field', 'button', 'element', 'a']]
+    
+    # Strategy 1: Find by placeholder text (flexible matching)
     try:
         inputs = page.query_selector_all('input')
         for input_elem in inputs:
-            placeholder = input_elem.get_attribute('placeholder') or ''
-            if target_description.lower() in placeholder.lower():
+            placeholder = (input_elem.get_attribute('placeholder') or '').lower()
+            
+            # Check if any key word appears in placeholder
+            for keyword in key_words:
+                if keyword in placeholder:
+                    return (input_elem, 'placeholder_text')
+            
+            # Also check exact match (case-insensitive)
+            if target_lower in placeholder or placeholder in target_lower:
                 return (input_elem, 'placeholder_text')
     except:
         pass
@@ -260,22 +285,36 @@ def find_element(page, target_description: str) -> tuple:
     try:
         buttons = page.query_selector_all('button')
         for button in buttons:
-            text = button.text_content().strip()
-            if target_description.lower() in text.lower():
+            text = button.text_content().strip().lower()
+            
+            # Check if any key word appears in button text
+            for keyword in key_words:
+                if keyword in text:
+                    return (button, 'button_text')
+            
+            if target_lower in text or text in target_lower:
                 return (button, 'button_text')
     except:
         pass
     
-    # Strategy 3: Find by accessibility role + name
+    # Strategy 3: Find by accessibility attributes
     try:
-        # Try to find by accessibility tree
-        # This is a simplified approach - looks for elements with matching accessible names
         all_elements = page.query_selector_all('*')
         for elem in all_elements:
             try:
-                accessible_name = elem.get_attribute('aria-label') or elem.get_attribute('placeholder') or elem.text_content().strip()
-                if target_description.lower() in accessible_name.lower():
-                    return (elem, 'accessibility_name')
+                # Check aria-label
+                aria_label = (elem.get_attribute('aria-label') or '').lower()
+                if aria_label:
+                    for keyword in key_words:
+                        if keyword in aria_label:
+                            return (elem, 'accessibility_label')
+                
+                # Check accessible name
+                accessible_name = (elem.text_content().strip() or '').lower()
+                if accessible_name:
+                    for keyword in key_words:
+                        if keyword in accessible_name:
+                            return (elem, 'accessibility_name')
             except:
                 pass
     except:
@@ -290,8 +329,20 @@ def find_element(page, target_description: str) -> tuple:
     except:
         pass
     
+    # Strategy 5: Find by visible text (last resort)
+    try:
+        all_inputs = page.query_selector_all('input, button, a')
+        for elem in all_inputs:
+            text = elem.text_content().strip().lower()
+            placeholder = (elem.get_attribute('placeholder') or '').lower()
+            combined = f"{text} {placeholder}".lower()
+            
+            if any(keyword in combined for keyword in key_words):
+                return (elem, 'text_match')
+    except:
+        pass
+    
     return (None, 'none')
-
 
 def act_type(page, target_description: str, value: str) -> dict:
     """Type text into an input field."""
@@ -425,3 +476,284 @@ def act_navigate(page, url: str) -> dict:
             "element_found": False,
             "strategy_used": "none"
         }
+
+
+
+# ========== PHASE 4: CHECKPOINT ==========
+
+def checkpoint(page, previous_url: str, action: dict) -> dict:
+    """
+    CHECKPOINT phase: Verify the action actually worked.
+    
+    Strict checking: form submissions (type) must result in URL change.
+    """
+    
+    try:
+        import time
+        
+        current_url = page.url
+        
+        # For TYPE action: Must result in URL change (form submission)
+        if action.get('action_type') == 'type':
+            if current_url != previous_url:
+                return {
+                    "success": True,
+                    "reason": "form_submitted",
+                    "current_url": current_url,
+                    "previous_url": previous_url
+                }
+            else:
+                # Typing without form submission = FAIL
+                return {
+                    "success": False,
+                    "reason": "no_form_submission",
+                    "current_url": current_url,
+                    "previous_url": previous_url
+                }
+        
+        # For CLICK action: Must result in URL change
+        if action.get('action_type') == 'click':
+            time.sleep(2)  # Give page time to respond
+            if page.url != previous_url:
+                return {
+                    "success": True,
+                    "reason": "url_changed",
+                    "current_url": page.url,
+                    "previous_url": previous_url
+                }
+            else:
+                return {
+                    "success": False,
+                    "reason": "click_no_effect",
+                    "current_url": page.url,
+                    "previous_url": previous_url
+                }
+        
+        # For NAVIGATE: check URL matches target
+        if action.get('action_type') == 'navigate':
+            target_url = action.get('url')
+            if page.url == target_url or target_url in page.url:
+                return {
+                    "success": True,
+                    "reason": "navigation_complete",
+                    "current_url": page.url,
+                    "previous_url": previous_url
+                }
+            else:
+                return {
+                    "success": False,
+                    "reason": "navigation_failed",
+                    "current_url": page.url,
+                    "previous_url": previous_url
+                }
+        
+        # Default: fail
+        return {
+            "success": False,
+            "reason": "unknown_action",
+            "current_url": page.url,
+            "previous_url": previous_url
+        }
+    
+    except Exception as e:
+        return {
+            "success": False,
+            "reason": f"checkpoint_error: {str(e)}",
+            "current_url": page.url,
+            "previous_url": previous_url
+        }
+
+# ========== PHASE 5: HANDLE ==========
+
+def handle_result(page, action: dict, act_result: dict, checkpoint_result: dict, error_count: int) -> dict:
+    """
+    HANDLE phase: Recover from errors or continue.
+    
+    Returns:
+    {
+        "should_continue": true/false,
+        "action": "continue|retry|escalate_to_human",
+        "error_count": 0/1/2...,
+        "reason": "..."
+    }
+    """
+    
+    # If action succeeded AND checkpoint passed
+    if act_result['success'] and checkpoint_result['success']:
+        return {
+            "should_continue": True,
+            "action": "continue",
+            "error_count": 0,
+            "reason": "Action succeeded, checkpoint passed"
+        }
+    
+    # If action failed but element was found
+    if not act_result['success'] and act_result['element_found']:
+        return {
+            "should_continue": False,
+            "action": "escalate_to_human",
+            "error_count": error_count + 1,
+            "reason": f"Action failed: {act_result['result']}"
+        }
+    
+    # If element not found, try retry
+    if not act_result['element_found']:
+        if error_count < 2:  # Max 2 retries
+            return {
+                "should_continue": True,
+                "action": "retry",
+                "error_count": error_count + 1,
+                "reason": "Element not found, retrying with different strategy"
+            }
+        else:
+            return {
+                "should_continue": False,
+                "action": "escalate_to_human",
+                "error_count": error_count + 1,
+                "reason": "Element not found after 2 retries"
+            }
+    
+    # Checkpoint failed (URL didn't change)
+    if not checkpoint_result['success']:
+        if error_count < 2:
+            return {
+                "should_continue": True,
+                "action": "retry",
+                "error_count": error_count + 1,
+                "reason": f"Action didn't have expected effect: {checkpoint_result['reason']}"
+            }
+        else:
+            return {
+                "should_continue": False,
+                "action": "escalate_to_human",
+                "error_count": error_count + 1,
+                "reason": "Action failed checkpoint after retries"
+            }
+    
+    # Default: escalate
+    return {
+        "should_continue": False,
+        "action": "escalate_to_human",
+        "error_count": error_count + 1,
+        "reason": "Unexpected state"
+    }
+
+
+# ========== PHASE 6: STOP ==========
+
+def should_stop(page, goal: str, step_count: int, error_count: int, max_steps: int = 20) -> dict:
+    """
+    STOP phase: Check if loop should exit.
+    
+    Returns:
+    {
+        "should_stop": true/false,
+        "reason": "goal_achieved|max_steps|error_limit|time_limit|continue",
+        "details": "..."
+    }
+    """
+    
+    try:
+        # Get page content to check for goal
+        page_content = page.content().lower()
+        current_url = page.url
+        
+        # Check 1: Goal achieved (balance appears)
+        if "check balance" in goal.lower():
+            if "balance" in page_content or "$" in page_content:
+                return {
+                    "should_stop": True,
+                    "reason": "goal_achieved",
+                    "details": "Balance text found on page"
+                }
+        
+        # Check 2: Max steps reached
+        if step_count >= max_steps:
+            return {
+                "should_stop": True,
+                "reason": "max_steps",
+                "details": f"Reached max steps: {step_count}"
+            }
+        
+        # Check 3: Error limit reached (same error 3x)
+        if error_count >= 3:
+            return {
+                "should_stop": True,
+                "reason": "error_limit",
+                "details": f"Error count: {error_count}"
+            }
+        
+        # Check 4: Still in login page after too many steps (stuck)
+        if "login" in current_url and step_count > 5:
+            return {
+                "should_stop": True,
+                "reason": "stuck_on_login",
+                "details": "Still on login page after 5 steps"
+            }
+        
+        # Default: continue
+        return {
+            "should_stop": False,
+            "reason": "continue",
+            "details": f"Step {step_count}, errors: {error_count}"
+        }
+    
+    except Exception as e:
+        return {
+            "should_stop": False,
+            "reason": "continue",
+            "details": f"Error checking stop condition: {str(e)}"
+        }
+
+
+# ========== PHASE 7: RECORD ==========
+
+import datetime
+
+def record_event(event_type: str, data: dict) -> dict:
+    """
+    Create an event record with timestamp.
+    
+    Returns:
+    {
+        "timestamp": "2025-01-16T10:30:45.123Z",
+        "type": "observe|decide|act|checkpoint|handle|stop",
+        "data": {...}
+    }
+    """
+    
+    return {
+        "timestamp": datetime.datetime.utcnow().isoformat() + "Z",
+        "type": event_type,
+        "data": data
+    }
+
+
+def save_events_to_file(events: list, filename: str = None) -> str:
+    """
+    Save all events to JSON file in evidence folder.
+    
+    Returns: filepath
+    """
+    
+    if not filename:
+        timestamp = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        filename = f"discovery_run_{timestamp}.json"
+    
+    filepath = f"{EVIDENCE_DIR}/{filename}"
+    
+    try:
+        with open(filepath, 'w') as f:
+            json.dump({
+                "started_at": events[0]['timestamp'] if events else None,
+                "ended_at": events[-1]['timestamp'] if events else None,
+                "total_events": len(events),
+                "events": events
+            }, f, indent=2)
+        
+        print(f"✅ Events saved to {filepath}")
+        return filepath
+    
+    except Exception as e:
+        print(f"❌ Error saving events: {e}")
+        return None

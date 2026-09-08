@@ -14,67 +14,22 @@ client = Anthropic()
 # Create evidence directory if it doesn't exist
 Path(EVIDENCE_DIR).mkdir(exist_ok=True)
 
-# ========== PROMPTS ==========
-
-SYSTEM_PROMPT = """You are an automation agent that controls a web browser.
-
-Your job is to complete tasks by interacting with web pages.
-
-You can perform these actions:
-1. type - Type text into an input field
-2. click - Click a button, link, or interactive element
-3. navigate - Navigate to a URL
-4. escalate_to_human - If you're stuck and can't proceed safely
-
-IMPORTANT: Only interact with elements that are visible on the page.
-If you can't find an element or don't know what to do, respond with escalate_to_human.
-
-Always respond in JSON format like this:
-{
-  "reasoning": "Why you chose this action",
-  "action_type": "type|click|navigate|escalate_to_human",
-  "target": "Element name or description",
-  "value": "Value to type (only for type action)",
-  "reason_for_escalation": "Why escalating (only for escalate_to_human)"
-}
-
-Do NOT include any text outside the JSON. Only JSON."""
-
-USER_PROMPT_TEMPLATE = """Goal: {goal}
-
-Current page state:
-URL: {url}
-Page title: {page_title}
-
-Form fields available:
-{form_fields}
-
-Visible text on page:
-{visible_text}
-
-Interactive elements:
-{interactive_elements}
-
-What should we do next? Respond ONLY with JSON."""
-
-
 # ========== MAIN AGENT LOOP ==========
 
 def agent_loop(goal: str, member_id: str, max_steps: int = 20):
     """
     Main agent loop: orchestrates all 7 phases.
-    
-    Args:
-        goal: What we're trying to accomplish
-        member_id: Member ID to use in interactions
-        max_steps: Maximum iterations before giving up
-    
-    Returns:
-        Dictionary with success status and events
     """
+    
+    from phases import (
+        observe_page, decide_action, act_on_page, 
+        checkpoint, handle_result, should_stop,
+        record_event, save_events_to_file
+    )
     
     events = []
     step_count = 0
+    error_count = 0
     
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -86,45 +41,110 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
             print(f"Step {step_count + 1}")
             print(f"{'='*60}")
             
+            previous_url = page.url
+            
             # PHASE 1: OBSERVE
             print("PHASE 1: OBSERVE")
             observation = observe_page(page, step_count + 1)
-            events.append({"phase": "observe", "step": step_count + 1, "observation": observation})
+            event = record_event("observe", observation)
+            events.append(event)
             print(f"  URL: {observation['url']}")
-            print(f"  Page: {observation['page_title']}")
             
             # PHASE 2: DECIDE
             print("PHASE 2: DECIDE")
             action = decide_action(goal, observation)
-            events.append({"phase": "decide", "step": step_count + 1, "action": action})
+            event = record_event("decide", action)
+            events.append(event)
             print(f"  Action: {action.get('action_type')}")
-            print(f"  Target: {action.get('target', 'N/A')}")
-            print(f"  Reasoning: {action.get('reasoning', 'N/A')}")
             
-            # Check if Claude wants to escalate
+            # Check if escalating
             if action.get('action_type') == 'escalate_to_human':
                 print("\n⚠️  ESCALATING TO HUMAN")
-                print(f"  Reason: {action.get('reason_for_escalation', action.get('reason', 'Unknown'))}")
-                events.append({"phase": "escalate", "step": step_count + 1, "reason": action.get('reason')})
+                event = record_event("escalate", {"reason": action.get('reason')})
+                events.append(event)
+                save_events_to_file(events)
                 browser.close()
                 return {"success": False, "reason": "escalated_to_human", "events": events}
 
+            # Printing to see what cl;asause is seeing after login
+            print("\n[DEBUG] Claude saw:")
+            print(f"  Form fields: {observation['form_fields']}")
+            print(f"  Interactive elements: {observation['interactive_elements']}")
+            print(f"  Claude decision: {action.get('action_type')} on '{action.get('target')}'")
             
+            # PHASE 3: ACT
             print("PHASE 3: ACT")
-            from phases import act_on_page
-            result = act_on_page(page, action)
-            events.append({"phase": "act", "step": step_count + 1, "result": result})
-            print(f"  Success: {result['success']}")
-            print(f"  Result: {result['result']}")
-            print(f"  Strategy: {result['strategy_used']}")
+            act_result = act_on_page(page, action)
+            event = record_event("act", act_result)
+            events.append(event)
+            print(f"  Success: {act_result['success']}")
+            print(f"  Result: {act_result['result']}")
             
-            # TODO: Add Phase 4 (CHECKPOINT), Phase 5 (HANDLE), Phase 6 (STOP), Phase 7 (RECORD)
+            # PHASE 4: CHECKPOINT
+            print("PHASE 4: CHECKPOINT")
+            checkpoint_result = checkpoint(page, previous_url, action)
+            event = record_event("checkpoint", checkpoint_result)
+            events.append(event)
+            print(f"  Success: {checkpoint_result['success']}")
+            print(f"  Reason: {checkpoint_result['reason']}")
+            
+            # PHASE 5: HANDLE
+            print("PHASE 5: HANDLE")
+            handle_result_dict = handle_result(page, action, act_result, checkpoint_result, error_count)
+            event = record_event("handle", handle_result_dict)
+            events.append(event)
+            print(f"  Action: {handle_result_dict['action']}")
+            print(f"  Error count: {handle_result_dict['error_count']}")
+            
+            error_count = handle_result_dict['error_count']
+            
+            # If handle says escalate
+            if handle_result_dict['action'] == 'escalate_to_human':
+                print("\n⚠️  ESCALATING TO HUMAN (from HANDLE)")
+                save_events_to_file(events)
+                browser.close()
+                return {"success": False, "reason": "escalated_to_human", "events": events}
+            
+            # If handle says retry, restart loop
+            if handle_result_dict['action'] == 'retry':
+                print("  Retrying action...")
+                step_count += 1
+                continue
+            
+            # PHASE 6: STOP
+            print("PHASE 6: STOP")
+            stop_result = should_stop(page, goal, step_count, error_count, max_steps)
+            event = record_event("stop", stop_result)
+            events.append(event)
+            print(f"  Should stop: {stop_result['should_stop']}")
+            print(f"  Reason: {stop_result['reason']}")
+            
+            if stop_result['should_stop']:
+                print("\n✅ GOAL ACHIEVED OR STOPPING CONDITIONS MET")
+                
+                # PHASE 7: RECORD
+                print("PHASE 7: RECORD")
+                artifact_path = save_events_to_file(events)
+                
+                browser.close()
+                return {
+                    "success": stop_result['reason'] == 'goal_achieved',
+                    "reason": stop_result['reason'],
+                    "events": events,
+                    "artifact_path": artifact_path
+                }
+            
             step_count += 1
         
+        # Max steps reached
+        print("\n❌ MAX STEPS REACHED")
+        save_events_to_file(events)
         browser.close()
-    
-    return {"success": False, "reason": "max_steps_reached", "events": events}
-
+        return {
+            "success": False,
+            "reason": "max_steps_reached",
+            "events": events
+        }
 
 # ========== TEST ==========
 

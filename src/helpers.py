@@ -21,11 +21,7 @@ def redact_value(field_name: str, value: str) -> str:
 
 
 def extract_form_fields(page) -> list:
-    """
-    Extract all form fields from the page.
-    
-    Returns list of dicts with: label, type, value (if visible)
-    """
+    """Extract all form fields from the page."""
     form_fields = []
     
     try:
@@ -35,8 +31,6 @@ def extract_form_fields(page) -> list:
             field_type = input_elem.get_attribute('type') or 'text'
             placeholder = input_elem.get_attribute('placeholder') or ''
             value = input_elem.input_value() if field_type != 'password' else ''
-            
-            # Redact if needed
             value = redact_value(placeholder or field_type, value)
             
             form_fields.append({
@@ -45,7 +39,7 @@ def extract_form_fields(page) -> list:
                 "value": value
             })
         
-        # Get all buttons
+        # Get all buttons (PRIORITIZE)
         buttons = page.query_selector_all('button')
         for button in buttons:
             text = button.text_content().strip()
@@ -54,14 +48,14 @@ def extract_form_fields(page) -> list:
             form_fields.append({
                 "type": "button",
                 "text": text,
-                "button_type": button_type
+                "button_type": button_type,
+                "visible": True  # Add this to make it clear
             })
     
     except Exception as e:
         print(f"Error extracting form fields: {e}")
     
     return form_fields
-
 
 def extract_visible_text(page) -> str:
     """
@@ -181,11 +175,22 @@ def parse_claude_response(response_text: str) -> dict:
     """
     Parse Claude's JSON response.
     
-    Returns action dict or escalation.
+    Handles cases where Claude wraps JSON in markdown code blocks.
     """
     try:
-        # Claude should return JSON
-        action = json.loads(response_text)
+        # Remove markdown code blocks if present
+        clean_text = response_text.strip()
+        if clean_text.startswith('```json'):
+            clean_text = clean_text[7:]  # Remove ```json
+        if clean_text.startswith('```'):
+            clean_text = clean_text[3:]  # Remove ```
+        if clean_text.endswith('```'):
+            clean_text = clean_text[:-3]  # Remove trailing ```
+        
+        clean_text = clean_text.strip()
+        
+        # Parse JSON
+        action = json.loads(clean_text)
         
         # Validate required fields
         if 'action_type' not in action:
@@ -196,7 +201,7 @@ def parse_claude_response(response_text: str) -> dict:
         
         return action
         
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
         print(f"Invalid JSON from Claude: {response_text}")
         return {
             "action_type": "escalate_to_human",
