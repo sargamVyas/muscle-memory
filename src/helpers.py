@@ -1,0 +1,211 @@
+# src/helpers.py
+
+import json
+from config import REDACTION_LIST
+
+
+def redact_value(field_name: str, value: str) -> str:
+    """
+    Redact sensitive values based on field name.
+    
+    If field name is in REDACTION_LIST, return [REDACTED]
+    Otherwise return the value as-is
+    """
+    field_name_lower = field_name.lower()
+    
+    for redacted_field in REDACTION_LIST:
+        if redacted_field.lower() in field_name_lower:
+            return "[REDACTED]"
+    
+    return value
+
+
+def extract_form_fields(page) -> list:
+    """
+    Extract all form fields from the page.
+    
+    Returns list of dicts with: label, type, value (if visible)
+    """
+    form_fields = []
+    
+    try:
+        # Get all inputs
+        inputs = page.query_selector_all('input')
+        for input_elem in inputs:
+            field_type = input_elem.get_attribute('type') or 'text'
+            placeholder = input_elem.get_attribute('placeholder') or ''
+            value = input_elem.input_value() if field_type != 'password' else ''
+            
+            # Redact if needed
+            value = redact_value(placeholder or field_type, value)
+            
+            form_fields.append({
+                "type": field_type,
+                "placeholder": placeholder,
+                "value": value
+            })
+        
+        # Get all buttons
+        buttons = page.query_selector_all('button')
+        for button in buttons:
+            text = button.text_content().strip()
+            button_type = button.get_attribute('type') or 'button'
+            
+            form_fields.append({
+                "type": "button",
+                "text": text,
+                "button_type": button_type
+            })
+    
+    except Exception as e:
+        print(f"Error extracting form fields: {e}")
+    
+    return form_fields
+
+
+def extract_visible_text(page) -> str:
+    """
+    Extract visible text from the page.
+    
+    Gets headings, labels, paragraphs, and button text.
+    """
+    try:
+        # Get body text content
+        body = page.query_selector('body')
+        if body:
+            text = body.text_content()
+            # Clean up whitespace
+            text = ' '.join(text.split())
+            # Limit to first 500 chars (don't overwhelm Claude)
+            return text[:500]
+    except Exception as e:
+        print(f"Error extracting visible text: {e}")
+    
+    return ""
+
+
+def extract_interactive_elements(page) -> list:
+    """
+    Extract clickable/interactive elements.
+    
+    Returns list of buttons, links, and form inputs.
+    """
+    elements = []
+    
+    try:
+        # Get all buttons
+        buttons = page.query_selector_all('button')
+        for button in buttons:
+            text = button.text_content().strip()
+            elements.append({
+                "type": "button",
+                "text": text,
+                "selector": get_selector(button)
+            })
+        
+        # Get all links
+        links = page.query_selector_all('a')
+        for link in links:
+            text = link.text_content().strip()
+            elements.append({
+                "type": "link",
+                "text": text,
+                "href": link.get_attribute('href'),
+                "selector": get_selector(link)
+            })
+        
+        # Get all inputs
+        inputs = page.query_selector_all('input')
+        for input_elem in inputs:
+            placeholder = input_elem.get_attribute('placeholder') or ''
+            elements.append({
+                "type": "input",
+                "placeholder": placeholder,
+                "selector": get_selector(input_elem)
+            })
+    
+    except Exception as e:
+        print(f"Error extracting interactive elements: {e}")
+    
+    return elements
+
+
+def get_selector(element) -> str:
+    """Get a CSS selector for an element."""
+    try:
+        # Try to get ID first
+        elem_id = element.get_attribute('id')
+        if elem_id:
+            return f"#{elem_id}"
+        
+        # Try to get other selectors
+        tag = element.evaluate("el => el.tagName.toLowerCase()")
+        return tag
+    except:
+        return "unknown"
+
+
+def format_form_fields(form_fields: list) -> str:
+    """Format form fields for Claude's context."""
+    if not form_fields:
+        return "No form fields found"
+    
+    lines = []
+    for i, field in enumerate(form_fields, 1):
+        if field['type'] == 'button':
+            lines.append(f"  {i}. Button: '{field['text']}'")
+        elif field['type'] == 'input':
+            lines.append(f"  {i}. Input: placeholder='{field.get('placeholder', '')}', value='{field.get('value', '')}'")
+    
+    return "\n".join(lines)
+
+
+def format_interactive_elements(elements: list) -> str:
+    """Format interactive elements for Claude's context."""
+    if not elements:
+        return "No interactive elements found"
+    
+    lines = []
+    for i, elem in enumerate(elements, 1):
+        if elem['type'] == 'button':
+            lines.append(f"  {i}. Button: '{elem['text']}'")
+        elif elem['type'] == 'link':
+            lines.append(f"  {i}. Link: '{elem['text']}' (href: {elem.get('href', '#')})")
+        elif elem['type'] == 'input':
+            lines.append(f"  {i}. Input field: '{elem.get('placeholder', 'No placeholder')}'")
+    
+    return "\n".join(lines)
+
+
+def parse_claude_response(response_text: str) -> dict:
+    """
+    Parse Claude's JSON response.
+    
+    Returns action dict or escalation.
+    """
+    try:
+        # Claude should return JSON
+        action = json.loads(response_text)
+        
+        # Validate required fields
+        if 'action_type' not in action:
+            return {
+                "action_type": "escalate_to_human",
+                "reason": "Claude response missing action_type field"
+            }
+        
+        return action
+        
+    except json.JSONDecodeError:
+        print(f"Invalid JSON from Claude: {response_text}")
+        return {
+            "action_type": "escalate_to_human",
+            "reason": "Claude returned invalid JSON",
+            "claude_response": response_text
+        }
+    except Exception as e:
+        print(f"Error parsing Claude response: {e}")
+        return {
+            "action_type": "escalate_to_human",
+            "reason": f"Error parsing response: {str(e)}"
+        }
