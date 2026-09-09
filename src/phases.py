@@ -275,7 +275,7 @@ def find_element(page, target_description: str) -> tuple:
                     return (input_elem, 'placeholder_text')
             
             # Also check exact match (case-insensitive)
-            if target_lower in placeholder or placeholder in target_lower:
+            if placeholder and (target_lower in placeholder or placeholder in target_lower):
                 return (input_elem, 'placeholder_text')
     except:
         pass
@@ -291,7 +291,7 @@ def find_element(page, target_description: str) -> tuple:
                 if keyword in text:
                     return (button, 'button_text')
             
-            if target_lower in text or text in target_lower:
+            if text and (target_lower in text or text in target_lower):
                 return (button, 'button_text')
     except:
         pass

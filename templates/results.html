@@ -8,7 +8,6 @@
     <h1>Member Details</h1>
     <p>Member ID: {{ member_id }}</p>
     <p>Name: {{ member.name }}</p>
-    <p>Balance: ${{ member.balance }}</p>
     
     <form method="POST" action="/action">
         <input type="hidden" name="member_id" value="{{ member_id }}">
