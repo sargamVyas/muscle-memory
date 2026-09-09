@@ -30,7 +30,8 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
     events = []
     step_count = 0
     error_count = 0
-    
+    extracted_data = {}
+
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
@@ -97,6 +98,14 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
             print(f"  Error count: {handle_result_dict['error_count']}")
             
             error_count = handle_result_dict['error_count']
+
+            # Capture extracted values so STOP knows the goal is actually satisfied
+            if action.get('action_type') == 'extract' and act_result.get('success'):
+                key = action.get('target', '').lower()
+                if 'balance' in key:
+                    extracted_data['balance'] = act_result.get('extracted_value')
+                elif 'name' in key:
+                    extracted_data['member_name'] = act_result.get('extracted_value')
             
             # If handle says escalate
             if handle_result_dict['action'] == 'escalate_to_human':
@@ -113,7 +122,7 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
             
             # PHASE 6: STOP
             print("PHASE 6: STOP")
-            stop_result = should_stop(page, goal, step_count, error_count, max_steps)
+            stop_result = should_stop(page, goal, step_count, error_count, max_steps, extracted_data)
             event = record_event("stop", stop_result)
             events.append(event)
             print(f"  Should stop: {stop_result['should_stop']}")

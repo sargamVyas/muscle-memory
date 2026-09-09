@@ -11,7 +11,8 @@ from helpers import (
     extract_interactive_elements,
     format_form_fields,
     format_interactive_elements,
-    parse_claude_response
+    parse_claude_response,
+    find_extract_value 
 )
 
 # Load .env file
@@ -31,11 +32,13 @@ CRITICAL - DECISION LOGIC:
 2. If an input field is EMPTY → type into it
 3. If an input field ALREADY HAS A VALUE → do NOT type again, instead CLICK the Submit/Search button
 4. Never type into a field that already has a value
+5. If the page already shows the data you need (e.g. a balance or name), EXTRACT it — don't click or type again
 
 ACTION TYPES:
 - type: Enter text into an EMPTY input field only
 - click: Click buttons, links, or perform actions
 - navigate: Go to a URL
+- extract: Pull a specific piece of data visible on the page (e.g. "balance", "member name") and record it
 - escalate_to_human: If stuck, ask for help
 
 EXAMPLE SCENARIOS:
@@ -45,14 +48,17 @@ Scenario 1: Field is empty, Search button visible
 Scenario 2: Field ALREADY HAS a value like '12345', Search button visible
   → Action: CLICK the Search button (do NOT type)
 
-Scenario 3: On results page showing member details
+Scenario 3: On results page showing member details, need to proceed
   → Action: CLICK on "Check Balance" to proceed
+
+Scenario 4: Page shows the balance or name you were asked to find
+  → Action: extract it (target = "balance" or "member name")
 
 Always respond ONLY in JSON format:
 {
   "reasoning": "Why this action",
-  "action_type": "type|click|navigate|escalate_to_human",
-  "target": "Element name",
+  "action_type": "type|click|navigate|extract|escalate_to_human",
+  "target": "Element name or data to extract",
   "value": "Text to type (only for type)"
 }"""
 
@@ -186,15 +192,6 @@ def decide_action(goal: str, observation: dict) -> dict:
             "reason": f"Error calling Claude: {str(e)}"
         }
         
-    except Exception as e:
-        print(f"Error in decide_action: {e}")
-        return {
-            "action_type": "escalate_to_human",
-            "reason": f"Error calling Claude: {str(e)}"
-        }
-
-
-
     # ========== PHASE 3: ACT ==========
 
 def act_on_page(page, action: dict) -> dict:
@@ -226,6 +223,8 @@ def act_on_page(page, action: dict) -> dict:
             return act_click(page, target)
         elif action_type == 'navigate':
             return act_navigate(page, action.get('url', ''))
+        elif action_type == 'extract':
+            return act_extract(page, target)
         else:
             return {
                 "action": action_type,
@@ -343,6 +342,31 @@ def find_element(page, target_description: str) -> tuple:
         pass
     
     return (None, 'none')
+
+def act_extract(page, target_description: str) -> dict:
+    """Pull a labeled value (balance, name, etc.) from the page's visible text."""
+    value = find_extract_value(page, target_description)
+
+    if value:
+        return {
+            "action": "extract",
+            "target": target_description,
+            "success": True,
+            "result": f"Extracted {target_description} = '{value}'",
+            "element_found": True,
+            "strategy_used": "regex_pattern",
+            "extracted_value": value
+        }
+
+    return {
+        "action": "extract",
+        "target": target_description,
+        "success": False,
+        "result": f"Could not find '{target_description}' on page",
+        "element_found": False,
+        "strategy_used": "regex_pattern",
+        "extracted_value": None
+    }
 
 def act_type(page, target_description: str, value: str) -> dict:
     """Type text into an input field."""
@@ -484,36 +508,48 @@ def act_navigate(page, url: str) -> dict:
 def checkpoint(page, previous_url: str, action: dict) -> dict:
     """
     CHECKPOINT phase: Verify the action actually worked.
-    
-    Strict checking: form submissions (type) must result in URL change.
+
+    type: verified by reading the field back (typing never changes the URL,
+          so URL-checking a type action is meaningless and was inflating error_count).
+    click / navigate: verified by URL change.
     """
-    
+
     try:
         import time
-        
         current_url = page.url
-        
-        # For TYPE action: Must result in URL change (form submission)
-        if action.get('action_type') == 'type':
-            if current_url != previous_url:
+        action_type = action.get('action_type')
+
+        # --- TYPE: success = the value actually landed in the field ---
+        if action_type == 'type':
+            target = action.get('target', '')
+            expected_value = action.get('value', '')
+
+            element, _ = find_element(page, target)
+            actual_value = None
+            if element:
+                try:
+                    actual_value = element.input_value()
+                except Exception:
+                    actual_value = None
+
+            if actual_value == expected_value:
                 return {
                     "success": True,
-                    "reason": "form_submitted",
+                    "reason": "value_entered",
                     "current_url": current_url,
                     "previous_url": previous_url
                 }
             else:
-                # Typing without form submission = FAIL
                 return {
                     "success": False,
-                    "reason": "no_form_submission",
+                    "reason": "value_not_entered",
                     "current_url": current_url,
                     "previous_url": previous_url
                 }
-        
-        # For CLICK action: Must result in URL change
-        if action.get('action_type') == 'click':
-            time.sleep(2)  # Give page time to respond
+
+        # --- CLICK: success = URL changed ---
+        if action_type == 'click':
+            time.sleep(1)
             if page.url != previous_url:
                 return {
                     "success": True,
@@ -528,11 +564,11 @@ def checkpoint(page, previous_url: str, action: dict) -> dict:
                     "current_url": page.url,
                     "previous_url": previous_url
                 }
-        
-        # For NAVIGATE: check URL matches target
-        if action.get('action_type') == 'navigate':
+
+        # --- NAVIGATE: success = reached target URL ---
+        if action_type == 'navigate':
             target_url = action.get('url')
-            if page.url == target_url or target_url in page.url:
+            if page.url == target_url or (target_url and target_url in page.url):
                 return {
                     "success": True,
                     "reason": "navigation_complete",
@@ -546,15 +582,31 @@ def checkpoint(page, previous_url: str, action: dict) -> dict:
                     "current_url": page.url,
                     "previous_url": previous_url
                 }
-        
-        # Default: fail
+            
+        if action_type == 'extract':
+            value = find_extract_value(page, action.get('target', ''))
+            if value:
+                return {
+                    "success": True,
+                    "reason": "value_extracted",
+                    "current_url": current_url,
+                    "previous_url": previous_url
+                }
+            else:
+                return {
+                    "success": False,
+                    "reason": "value_not_found",
+                    "current_url": current_url,
+                    "previous_url": previous_url
+                }
+
         return {
             "success": False,
             "reason": "unknown_action",
             "current_url": page.url,
             "previous_url": previous_url
         }
-    
+
     except Exception as e:
         return {
             "success": False,
@@ -562,7 +614,6 @@ def checkpoint(page, previous_url: str, action: dict) -> dict:
             "current_url": page.url,
             "previous_url": previous_url
         }
-
 # ========== PHASE 5: HANDLE ==========
 
 def handle_result(page, action: dict, act_result: dict, checkpoint_result: dict, error_count: int) -> dict:
@@ -641,32 +692,32 @@ def handle_result(page, action: dict, act_result: dict, checkpoint_result: dict,
 
 # ========== PHASE 6: STOP ==========
 
-def should_stop(page, goal: str, step_count: int, error_count: int, max_steps: int = 20) -> dict:
+def should_stop(page, goal: str, step_count: int, error_count: int, max_steps: int = 20, extracted_data: dict = None) -> dict:
     """
     STOP phase: Check if loop should exit.
-    
+
     Returns:
     {
         "should_stop": true/false,
-        "reason": "goal_achieved|max_steps|error_limit|time_limit|continue",
+        "reason": "goal_achieved|max_steps|error_limit|stuck_on_login|continue",
         "details": "..."
     }
     """
-    
+    extracted_data = extracted_data or {}
+
     try:
-        # Get page content to check for goal
-        page_content = page.content().lower()
         current_url = page.url
-        
-        # Check 1: Goal achieved (balance appears)
+
+        # Check 1: Goal achieved — only once the value has actually been
+        # extracted, not just because the word "balance" is somewhere on the page.
         if "check balance" in goal.lower():
-            if "balance" in page_content or "$" in page_content:
+            if extracted_data.get("balance"):
                 return {
                     "should_stop": True,
                     "reason": "goal_achieved",
-                    "details": "Balance text found on page"
+                    "details": f"Extracted balance: {extracted_data['balance']}"
                 }
-        
+
         # Check 2: Max steps reached
         if step_count >= max_steps:
             return {
@@ -674,37 +725,36 @@ def should_stop(page, goal: str, step_count: int, error_count: int, max_steps: i
                 "reason": "max_steps",
                 "details": f"Reached max steps: {step_count}"
             }
-        
-        # Check 3: Error limit reached (same error 3x)
+
+        # Check 3: Error limit reached
         if error_count >= 3:
             return {
                 "should_stop": True,
                 "reason": "error_limit",
                 "details": f"Error count: {error_count}"
             }
-        
-        # Check 4: Still in login page after too many steps (stuck)
+
+        # Check 4: Still on login page after too many steps (stuck)
         if "login" in current_url and step_count > 5:
             return {
                 "should_stop": True,
                 "reason": "stuck_on_login",
                 "details": "Still on login page after 5 steps"
             }
-        
+
         # Default: continue
         return {
             "should_stop": False,
             "reason": "continue",
             "details": f"Step {step_count}, errors: {error_count}"
         }
-    
+
     except Exception as e:
         return {
             "should_stop": False,
             "reason": "continue",
             "details": f"Error checking stop condition: {str(e)}"
         }
-
 
 # ========== PHASE 7: RECORD ==========
 
