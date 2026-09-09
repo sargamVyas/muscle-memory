@@ -53,7 +53,7 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
             
             # PHASE 2: DECIDE
             print("PHASE 2: DECIDE")
-            action = decide_action(goal, observation)
+            action = decide_action(goal, observation, extracted_data)
             event = record_event("decide", action)
             events.append(event)
             print(f"  Action: {action.get('action_type')}")
@@ -165,7 +165,7 @@ if __name__ == "__main__":
     print("Goal: Check balance for member 12345")
     
     result = agent_loop(
-        goal="Check balance for member 12345",
+        goal="Check balance and get member name for member 12345",
         member_id="12345"
     )
     

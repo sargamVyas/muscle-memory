@@ -32,7 +32,8 @@ CRITICAL - DECISION LOGIC:
 2. If an input field is EMPTY → type into it
 3. If an input field ALREADY HAS A VALUE → do NOT type again, instead CLICK the Submit/Search button
 4. Never type into a field that already has a value
-5. If the page already shows the data you need (e.g. a balance or name), EXTRACT it — don't click or type again
+5. Check "Already collected" below — if the page shows a piece of data you still need, EXTRACT it. Never extract something already listed as collected.
+6. If everything you still need is on this page, extract it before clicking anywhere else.
 
 ACTION TYPES:
 - type: Enter text into an EMPTY input field only
@@ -51,7 +52,7 @@ Scenario 2: Field ALREADY HAS a value like '12345', Search button visible
 Scenario 3: On results page showing member details, need to proceed
   → Action: CLICK on "Check Balance" to proceed
 
-Scenario 4: Page shows the balance or name you were asked to find
+Scenario 4: Page shows data you still need (check "Already collected" first)
   → Action: extract it (target = "balance" or "member name")
 
 Always respond ONLY in JSON format:
@@ -76,6 +77,8 @@ Visible text on page:
 
 Interactive elements:
 {interactive_elements}
+
+Already collected: {already_collected}
 
 What should we do next? Respond ONLY with JSON."""
 
@@ -143,48 +146,44 @@ def extract_response_text(response) -> str:
     raise ValueError("No text content in Claude response")
 
 
-def decide_action(goal: str, observation: dict) -> dict:
+def decide_action(goal: str, observation: dict, extracted_data: dict = None) -> dict:
     """DECIDE phase: Ask Claude what to do next."""
-    
+    extracted_data = extracted_data or {}
+
     try:
         form_fields_str = format_form_fields(observation['form_fields'])
         interactive_str = format_interactive_elements(observation['interactive_elements'])
-        
-        # Add explicit instruction based on form state
+
+        collected_str = ", ".join(f"{k}={v}" for k, v in extracted_data.items()) or "nothing yet"
+
         extra_instruction = ""
         for field in observation['form_fields']:
             if field.get('type') == 'text' and field.get('value'):
-                # Field already has value
                 extra_instruction = "\n⚠️ CRITICAL: The input field ALREADY has a value. DO NOT TYPE. CLICK THE SEARCH BUTTON INSTEAD."
                 break
-        
+
         user_prompt = USER_PROMPT_TEMPLATE.format(
             goal=goal,
             url=observation['url'],
             page_title=observation['page_title'],
             form_fields=form_fields_str,
             visible_text=observation['visible_text'],
-            interactive_elements=interactive_str
+            interactive_elements=interactive_str,
+            already_collected=collected_str
         ) + extra_instruction
-        
-        # Call Claude
+
         response = client.messages.create(
             model="claude-opus-5",
             max_tokens=1024,
             system=SYSTEM_PROMPT,
-            messages=[
-                {
-                    "role": "user",
-                    "content": user_prompt
-                }
-            ]
+            messages=[{"role": "user", "content": user_prompt}]
         )
-        
+
         response_text = extract_response_text(response)
         action = parse_claude_response(response_text)
-        
+
         return action
-        
+
     except Exception as e:
         print(f"Error in decide_action: {e}")
         return {
@@ -711,11 +710,15 @@ def should_stop(page, goal: str, step_count: int, error_count: int, max_steps: i
         # Check 1: Goal achieved — only once the value has actually been
         # extracted, not just because the word "balance" is somewhere on the page.
         if "check balance" in goal.lower():
-            if extracted_data.get("balance"):
+            have_balance = bool(extracted_data.get("balance"))
+            wants_name = "name" in goal.lower()
+            have_name = bool(extracted_data.get("member_name"))
+
+            if have_balance and (have_name or not wants_name):
                 return {
                     "should_stop": True,
                     "reason": "goal_achieved",
-                    "details": f"Extracted balance: {extracted_data['balance']}"
+                    "details": f"Extracted: {extracted_data}"
                 }
 
         # Check 2: Max steps reached
