@@ -2,9 +2,9 @@
 
 **LLM-driven UI automation that learns once, replays deterministically.**
 
-An AI agent discovers how to automate a task on a real UI (no APIs). 
-The successful run is recorded as a reusable artifact. 
-Replay executes that artifact deterministically—no LLM in the loop.
+An AI agent discovers how to automate a task on a real UI (no APIs).
+The successful run is recorded as a reusable, parameterized artifact.
+Replay executes that artifact deterministically — no LLM in the loop.
 
 Built for legacy banking UIs and other hostile interfaces where robust element targeting and error handling matter.
 
@@ -27,21 +27,28 @@ Most UI automation systems either:
 ## How It Works
 
 ### Phase 1: Discovery (LLM-driven)
-- Agent observes page state
-- Decides what to do (with Claude)
+- Agent observes page state (form fields, visible text, interactive elements)
+- Decides what to do next (with Claude)
 - Acts on the UI (Playwright)
-- Records what happened
+- Verifies each action with a checkpoint, retries on failure
+- Records every event to a timestamped log
 
 ### Phase 2: Recording
 - Successful run becomes a structured artifact
 - Parameterized for reuse (works with different inputs)
-- Versioned (tracks variants across tenants)
+- Versioned (semver in artifact metadata)
 
 ### Phase 3: Replay (Deterministic)
 - Read artifact + inputs
 - Execute steps without LLM
-- Handle errors gracefully
+- Distinguish business outcomes (member not found) from technical failures
 - Return outputs
+
+```
+Discovery   → Playwright + Claude   (live browser, LLM decides)
+Recorder    → no Playwright, no LLM (pure file transform)
+Replay      → Playwright, no LLM    (live browser, fixed script)
+```
 
 ---
 
@@ -54,39 +61,45 @@ Most UI automation systems either:
 ### Installation
 
 ```bash
-# Clone repo
-git clone https://github.com/sargam.shukla12/muscle-memory.git
+git clone https://github.com/<your-username>/muscle-memory.git
 cd muscle-memory
-
-# Install dependencies (updated as we code)
+python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
+playwright install chromium
 
-# Set Claude API key
-export ANTHROPIC_API_KEY="your-key-here"
+# API key — either export it, or put it in a .env file (loaded via python-dotenv)
+echo 'ANTHROPIC_API_KEY=your-key-here' > .env
 ```
 
 ### Running the Demo
 
-**1. Start the mock app (hostile banking UI)**
+**Terminal 1 — start the mock banking app**
 ```bash
 python src/mock_app.py
-# Opens http://localhost:8000
+# Serves http://localhost:8000/login
 ```
 
-**2. Run agent discovery** (LLM learns the flow)
+**Terminal 2 — run the three phases in order**
+
+1. **Discovery** (LLM-driven, Claude in the loop). Goal and member ID are set in the `__main__` block of `agent.py`.
 ```bash
-python src/agent.py \
-  --goal "check balance for member 12345" \
-  --member_id 12345 \
-  --output artifact.json
+python src/agent.py
+# → evidence/discovery_run_<timestamp>.json + per-step screenshots
 ```
 
-**3. Run replay** (deterministic execution, no LLM)
+2. **Record** the successful run as a parameterized artifact. Pass the member ID used during discovery so it can be replaced with `{member_id}`.
 ```bash
-python src/replay_engine.py \
-  --artifact artifact.json \
-  --member_id 67890
-# Same flow, different input, no model needed
+python src/artifact_recorder.py evidence/discovery_run_<timestamp>.json 12345
+# → evidence/artifact.json
+```
+
+3. **Replay** against a member the LLM never saw — no Claude calls.
+```bash
+python src/replay_engine.py evidence/artifact.json 67890
+# → Success: True, Outputs: {'member_name': 'Jane Smith', 'balance': '2500.0'}
+
+python src/replay_engine.py evidence/artifact.json 99999
+# → Success: False, Reason: business_outcome (member not found — reported, not retried)
 ```
 
 ---
@@ -95,29 +108,30 @@ python src/replay_engine.py \
 
 ```
 muscle-memory/
-├── README.md                 # This file
-├── DESIGN_NOTES.md          # Complete architecture decisions
-├── REPORT.md                # Design write-up (1-3 pages)
+├── README.md
+├── DESIGN_NOTES.md               # Architecture decisions and rationale
+├── REPORT.md                     # Design write-up
+├── requirements.txt
+├── members.json                  # Mock app data (3 test members)
+├── .env                          # ANTHROPIC_API_KEY (gitignored)
 │
 ├── src/
-│   ├── __init__.py
-│   ├── agent.py             # LLM-driven agent loop
-│   ├── mock_app.py          # Flask app (hostile HTML)
-│   ├── replay_engine.py     # Deterministic execution
-│   └── locator.py           # Multi-signal element resolver
+│   ├── mock_app.py               # Flask app — hostile banking UI
+│   ├── agent.py                  # Discovery loop orchestrator (7 phases)
+│   ├── phases.py                 # OBSERVE / DECIDE / ACT / CHECKPOINT / HANDLE / STOP / RECORD
+│   │                             #   + multi-signal element resolver (find_element)
+│   ├── helpers.py                # Page extraction, redaction, value extraction, response parsing
+│   ├── config.py                 # Redaction list, evidence directory
+│   ├── artifact_recorder.py      # discovery_run.json → artifact.json
+│   └── replay_engine.py          # Deterministic replay, no LLM
 │
-├── tests/
-│   ├── __init__.py
-│   └── test_replay.py       # Replay logic tests
+├── templates/                    # login / results / action / error pages
 │
-├── evidence/
-│   ├── discovery_run_001.json      # Artifact from discovery
-│   ├── discovery_logs.txt          # Events + debugging
-│   ├── replay_run_001.json         # Replay execution
-│   └── screenshots/                # Evidence images
-│
-├── requirements.txt         # Dependencies
-└── .gitignore
+└── evidence/
+    ├── discovery_run_<ts>.json   # Full event log from a discovery run
+    ├── step_NNN_screenshot.png   # Per-step screenshots from discovery
+    ├── artifact.json             # Recorded, parameterized artifact
+    └── replay_run_<id>_<ts>.json # Replay execution logs
 ```
 
 ---
@@ -126,7 +140,7 @@ muscle-memory/
 
 See **DESIGN_NOTES.md** for:
 - Why we chose hostile HTML over clean UIs
-- Multi-signal locator strategy (4 fallback strategies)
+- Multi-signal locator strategy (5 fallback strategies)
 - Agent loop structure (7 phases)
 - Error handling + human escalation
 - Security (redaction of PII)
@@ -135,25 +149,22 @@ See **DESIGN_NOTES.md** for:
 
 ## Key Features
 
-✅ **Handles hostile HTML** — Table layouts, no IDs, missing semantics  
-✅ **Robust element targeting** — Accessibility tree + label + CSS + visual fallbacks  
-✅ **Deterministic replay** — Same inputs → same outputs, no LLM needed  
-✅ **Error handling** — Business outcomes, recoverable errors, hard failures  
-✅ **Human escalation** — Pause automation, let human intervene, resume  
-✅ **Security** — Redacts PII, omits secrets, allowlist enforcement  
+✅ **Hostile HTML target** — nested-table layout, no IDs, randomized class names (login page)
+✅ **Multi-signal element resolver** — placeholder → button text → accessibility attributes → CSS → text match, in priority order
+✅ **LLM-driven discovery** — 7-phase loop with per-action-type checkpoints and bounded retry
+✅ **Typed, parameterized artifact** — contract (inputs/outputs), ordered steps, checkpoints, `{member_id}` placeholders
+✅ **Deterministic replay** — same artifact, unseen member ID, zero LLM calls (verified: member 67890)
+✅ **Business-outcome handling** — member-not-found detected and reported distinctly from technical failure (verified: member 99999)
+✅ **Redaction** — sensitive form values redacted before reaching the LLM; passwords never captured
+🔲 **Action allowlist** — block withdraw/transfer-type actions — *in progress*
+🔲 **Human escalation** — pause / operator takeover / resume — *in progress*
 
 ---
 
 ## Status
 
-**In Progress:**
-- Mock app structure
-- Agent loop implementation
-- Artifact recording
-- Replay engine
-- Real discovery run + evidence
-
-**See DESIGN_NOTES.md for architecture overview.**
+**Done:** mock app · discovery loop · artifact recording · replay engine · verified evidence (discovery run, artifact, two replay runs)
+**In progress:** action allowlist · human escalation · tests · REPORT.md
 
 ---
 
@@ -165,5 +176,5 @@ MIT
 
 ## Contact
 
-Built for Interface.ai assignment.  
+Built for Interface.ai assignment.
 Questions? See DESIGN_NOTES.md for design rationale.
