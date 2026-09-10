@@ -1,0 +1,47 @@
+{
+  "success": false,
+  "outputs": {},
+  "reason": "business_outcome",
+  "details": {
+    "outcome": "member_not_found",
+    "message": "Member not found"
+  },
+  "steps_executed": [
+    {
+      "step_id": 1,
+      "action": "type",
+      "act_result": {
+        "action": "type",
+        "target": "Enter Member ID",
+        "success": true,
+        "result": "Typed '99999' into field",
+        "element_found": true,
+        "strategy_used": "placeholder_text"
+      },
+      "checkpoint_result": {
+        "success": true,
+        "reason": "value_entered",
+        "current_url": "http://localhost:8000/login",
+        "previous_url": "http://localhost:8000/login"
+      }
+    },
+    {
+      "step_id": 2,
+      "action": "click",
+      "act_result": {
+        "action": "click",
+        "target": "Search button",
+        "success": true,
+        "result": "Clicked on Search button",
+        "element_found": true,
+        "strategy_used": "button_text"
+      },
+      "checkpoint_result": {
+        "success": true,
+        "reason": "url_changed",
+        "current_url": "http://localhost:8000/results",
+        "previous_url": "http://localhost:8000/login"
+      }
+    }
+  ]
+}

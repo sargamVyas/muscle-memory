@@ -1,0 +1,75 @@
+{
+  "metadata": {
+    "id": "check_member_balance",
+    "version": "1.0.0",
+    "goal": "Check balance and get member name for member {member_id}",
+    "status": "draft",
+    "created_at": "2026-09-09T20:13:44.897460Z",
+    "created_by": "discovery_run_20260909_194439.json"
+  },
+  "contract": {
+    "inputs": {
+      "member_id": {
+        "type": "string",
+        "required": true
+      }
+    },
+    "outputs": {
+      "member_name": {
+        "type": "string"
+      },
+      "balance": {
+        "type": "string"
+      }
+    }
+  },
+  "steps": [
+    {
+      "step_id": 1,
+      "action": "type",
+      "target": "Enter Member ID",
+      "checkpoint": "value_entered",
+      "value": "{member_id}"
+    },
+    {
+      "step_id": 2,
+      "action": "click",
+      "target": "Search button",
+      "checkpoint": "url_changed"
+    },
+    {
+      "step_id": 3,
+      "action": "extract",
+      "target": "member name",
+      "checkpoint": "value_extracted",
+      "output_key": "member_name"
+    },
+    {
+      "step_id": 4,
+      "action": "click",
+      "target": "Check Balance",
+      "checkpoint": "url_changed"
+    },
+    {
+      "step_id": 5,
+      "action": "extract",
+      "target": "balance",
+      "checkpoint": "value_extracted",
+      "output_key": "balance"
+    }
+  ],
+  "error_handling": {
+    "member_not_found": {
+      "trigger": "Page shows 'Member {id} not found'",
+      "response": "return_business_outcome"
+    },
+    "element_not_found": {
+      "trigger": "Resolver exhausts all strategies for a target",
+      "response": "escalate_to_human"
+    },
+    "timeout": {
+      "trigger": "Action or page load exceeds expected timeout",
+      "response": "escalate_to_human"
+    }
+  }
+}
