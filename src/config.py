@@ -1,5 +1,8 @@
 # src/config.py
 
+HEADLESS = True
+
+
 # Fields to redact (sensitive PII)
 REDACTION_LIST = [
     'balance',

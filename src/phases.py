@@ -736,6 +736,48 @@ def handle_result(page, action: dict, act_result: dict, checkpoint_result: dict,
     }
 
 
+
+# ========== HUMAN ESCALATION ==========
+
+def escalate_to_human(page, events: list, reason: str, step_count: int) -> str:
+    """
+    Pause automation and hand control to a human operator.
+
+    Saves a checkpoint of events so far, screenshots the current page, and
+    blocks until the operator types 'resume' or 'abort'. The browser stays
+    open — run with HEADLESS=False so the operator can fix the page state
+    (dismiss a dialog, navigate, log in) before resuming.
+
+    Returns the operator's decision: 'resume' or 'abort'.
+    """
+    import datetime
+    ts = datetime.datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    checkpoint_path = save_events_to_file(events, filename=f"escalation_checkpoint_{ts}.json")
+    screenshot_path = f"{EVIDENCE_DIR}/escalation_step_{step_count:03d}_{ts}.png"
+    try:
+        page.screenshot(path=screenshot_path)
+    except Exception:
+        screenshot_path = None
+
+    print("\n" + "=" * 60)
+    print("⚠️  HUMAN ESCALATION — automation paused")
+    print("=" * 60)
+    print(f"Reason:      {reason}")
+    print(f"Current URL: {page.url}")
+    print(f"Screenshot:  {screenshot_path}")
+    print(f"Checkpoint:  {checkpoint_path}")
+    print()
+    print("The browser is still open. Fix the page state if needed, then:")
+    print("  resume  — hand control back to the agent from the current page")
+    print("  abort   — stop the run")
+
+    while True:
+        choice = input("operator> ").strip().lower()
+        if choice in ("resume", "abort"):
+            return choice
+        print("Please type 'resume' or 'abort'.")
+
+
 # ========== PHASE 6: STOP ==========
 
 def should_stop(page, goal: str, step_count: int, error_count: int, max_steps: int = 20, extracted_data: dict = None) -> dict:

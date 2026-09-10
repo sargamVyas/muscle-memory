@@ -5,6 +5,7 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 from anthropic import Anthropic
 from config import EVIDENCE_DIR
+from config import EVIDENCE_DIR, HEADLESS
 from phases import observe_page, decide_action
 from helpers import parse_claude_response
 
@@ -24,7 +25,8 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
     from phases import (
         observe_page, decide_action, act_on_page, 
         checkpoint, handle_result, should_stop,
-        record_event, save_events_to_file
+        record_event, save_events_to_file,
+        escalate_to_human
     )
     
     events = []
@@ -33,7 +35,7 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
     extracted_data = {}
 
     with sync_playwright() as p:
-        browser = p.chromium.launch()
+        browser = p.chromium.launch(headless=HEADLESS)
         page = browser.new_page()
         page.goto("http://localhost:8000/login")
         
@@ -60,12 +62,17 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
             
             # Check if escalating
             if action.get('action_type') == 'escalate_to_human':
-                print("\n⚠️  ESCALATING TO HUMAN")
-                event = record_event("escalate", {"reason": action.get('reason') or action.get('reasoning')})
-                events.append(event)
-                save_events_to_file(events)
-                browser.close()
-                return {"success": False, "reason": "escalated_to_human", "events": events}
+                reason = action.get('reason') or action.get('reasoning') or "Agent requested escalation"
+                decision = escalate_to_human(page, events, reason, step_count + 1)
+                events.append(record_event("escalation", {"reason": reason, "operator_decision": decision}))
+                if decision == "abort":
+                    save_events_to_file(events)
+                    browser.close()
+                    return {"success": False, "reason": "escalated_to_human", "events": events}
+                # resume — operator may have changed the page; re-observe from here
+                error_count = 0
+                step_count += 1
+                continue
 
             # Printing to see what cl;asause is seeing after login
             print("\n[DEBUG] Claude saw:")
@@ -109,10 +116,16 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
             
             # If handle says escalate
             if handle_result_dict['action'] == 'escalate_to_human':
-                print("\n⚠️  ESCALATING TO HUMAN (from HANDLE)")
-                save_events_to_file(events)
-                browser.close()
-                return {"success": False, "reason": "escalated_to_human", "events": events}
+                reason = handle_result_dict['reason']
+                decision = escalate_to_human(page, events, reason, step_count + 1)
+                events.append(record_event("escalation", {"reason": reason, "operator_decision": decision}))
+                if decision == "abort":
+                    save_events_to_file(events)
+                    browser.close()
+                    return {"success": False, "reason": "escalated_to_human", "events": events}
+                error_count = 0
+                step_count += 1
+                continue
             
             # If handle says retry, restart loop
             if handle_result_dict['action'] == 'retry':
