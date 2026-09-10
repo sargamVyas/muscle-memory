@@ -1,9 +1,28 @@
 # src/helpers.py
-
+import re
 import json
 from config import REDACTION_LIST
 
 
+EXTRACT_PATTERNS = {
+    "balance": r'balance[:\s]*\$?\s*([\d,]+\.?\d*)',
+    "name": r'name[:\s]+([A-Za-z][A-Za-z\s]*?)(?:\n|$|\.|\s{2,})',
+}
+
+
+def find_extract_value(page, target_description: str):
+    """Look up a labeled value (balance, name, etc.) in the page's visible text."""
+    target_key = target_description.lower().strip()
+    pattern = next((rgx for key, rgx in EXTRACT_PATTERNS.items() if key in target_key), None)
+    if not pattern:
+        return None
+    try:
+        visible = page.query_selector('body').text_content()
+        match = re.search(pattern, visible, re.IGNORECASE)
+        return match.group(1).strip() if match else None
+    except Exception:
+        return None
+    
 def redact_value(field_name: str, value: str) -> str:
     """
     Redact sensitive values based on field name.

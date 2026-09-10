@@ -1,0 +1,68 @@
+{
+  "success": false,
+  "outputs": {
+    "member_name": "John Doe"
+  },
+  "reason": "guardrail_blocked",
+  "details": {
+    "step_id": 4,
+    "reason": "Blocked action: 'Withdraw' matches 'withdraw'"
+  },
+  "steps_executed": [
+    {
+      "step_id": 1,
+      "action": "type",
+      "act_result": {
+        "action": "type",
+        "target": "Enter Member ID",
+        "success": true,
+        "result": "Typed '12345' into field",
+        "element_found": true,
+        "strategy_used": "placeholder_text"
+      },
+      "checkpoint_result": {
+        "success": true,
+        "reason": "value_entered",
+        "current_url": "http://localhost:8000/login",
+        "previous_url": "http://localhost:8000/login"
+      }
+    },
+    {
+      "step_id": 2,
+      "action": "click",
+      "act_result": {
+        "action": "click",
+        "target": "Search button",
+        "success": true,
+        "result": "Clicked on Search button",
+        "element_found": true,
+        "strategy_used": "button_text"
+      },
+      "checkpoint_result": {
+        "success": true,
+        "reason": "url_changed",
+        "current_url": "http://localhost:8000/results",
+        "previous_url": "http://localhost:8000/login"
+      }
+    },
+    {
+      "step_id": 3,
+      "action": "extract",
+      "act_result": {
+        "action": "extract",
+        "target": "member name",
+        "success": true,
+        "result": "Extracted member name = 'John Doe'",
+        "element_found": true,
+        "strategy_used": "regex_pattern",
+        "extracted_value": "John Doe"
+      },
+      "checkpoint_result": {
+        "success": true,
+        "reason": "value_extracted",
+        "current_url": "http://localhost:8000/results",
+        "previous_url": "http://localhost:8000/results"
+      }
+    }
+  ]
+}

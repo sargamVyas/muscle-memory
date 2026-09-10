@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from dotenv import load_dotenv
 from anthropic import Anthropic
+from urllib.parse import urlparse
+from config import REDACTION_LIST, EVIDENCE_DIR, BLOCKED_ACTION_KEYWORDS, ALLOWED_DOMAINS
 from config import REDACTION_LIST, EVIDENCE_DIR
 from helpers import (
     extract_form_fields,
@@ -41,6 +43,10 @@ ACTION TYPES:
 - navigate: Go to a URL
 - extract: Pull a specific piece of data visible on the page (e.g. "balance", "member name") and record it
 - escalate_to_human: If stuck, ask for help
+
+SAFETY RULES:
+- You may NOT withdraw, transfer, delete, or close accounts. These actions are blocked.
+- If the goal requires a blocked action, respond with escalate_to_human instead of attempting it.
 
 EXAMPLE SCENARIOS:
 Scenario 1: Field is empty, Search button visible
@@ -191,6 +197,26 @@ def decide_action(goal: str, observation: dict, extracted_data: dict = None) -> 
             "reason": f"Error calling Claude: {str(e)}"
         }
         
+def check_guardrails(action_type: str, target: str = "", url: str = "") -> tuple:
+    """
+    Safety allowlist. Returns (allowed, reason).
+    Enforced in code, not just in the prompt — the LLM can be told not to
+    withdraw, but this is what actually stops it. Called by both discovery
+    (act_on_page) and replay, so no path bypasses it.
+    """
+    if action_type == 'click':
+        t = (target or '').lower()
+        for kw in BLOCKED_ACTION_KEYWORDS:
+            if kw in t:
+                return (False, f"Blocked action: '{target}' matches '{kw}'")
+
+    if action_type == 'navigate':
+        host = urlparse(url or '').netloc
+        if host not in ALLOWED_DOMAINS:
+            return (False, f"Blocked navigation: '{host}' not in allowed domains")
+
+    return (True, "allowed")
+
     # ========== PHASE 3: ACT ==========
 
 def act_on_page(page, action: dict) -> dict:
@@ -214,6 +240,18 @@ def act_on_page(page, action: dict) -> dict:
         action_type = action.get('action_type')
         target = action.get('target')
         value = action.get('value', '')
+
+        allowed, reason = check_guardrails(action_type, target, action.get('url', ''))
+        if not allowed:
+            return {
+                "action": action_type,
+                "target": target,
+                "success": False,
+                "result": reason,
+                "element_found": False,
+                "strategy_used": "none",
+                "blocked": True
+            }
         
         # Handle each action type
         if action_type == 'type':
@@ -627,6 +665,15 @@ def handle_result(page, action: dict, act_result: dict, checkpoint_result: dict,
         "reason": "..."
     }
     """
+
+        # Guardrail violations are never retried — escalate immediately
+    if act_result.get('blocked'):
+        return {
+            "should_continue": False,
+            "action": "escalate_to_human",
+            "error_count": error_count + 1,
+            "reason": f"Guardrail: {act_result['result']}"
+        }
     
     # If action succeeded AND checkpoint passed
     if act_result['success'] and checkpoint_result['success']:

@@ -19,6 +19,8 @@ from playwright.sync_api import sync_playwright
 from phases import act_type, act_click, act_navigate, act_extract, checkpoint
 from config import EVIDENCE_DIR
 
+from phases import act_type, act_click, act_navigate, act_extract, checkpoint, check_guardrails
+
 
 def substitute_params(value, params: dict):
     """Replace {param_name} placeholders with actual values."""
@@ -71,6 +73,7 @@ def replay_artifact(artifact_path: str, params: dict, start_url: str = "http://l
             # Check before each step — catches the case where the previous
             # step's click landed us on error.html instead of the expected page.
             business_outcome = detect_business_outcome(page)
+
             if business_outcome:
                 browser.close()
                 return {
@@ -78,6 +81,17 @@ def replay_artifact(artifact_path: str, params: dict, start_url: str = "http://l
                     "outputs": outputs,
                     "reason": "business_outcome",
                     "details": business_outcome,
+                    "steps_executed": steps_log,
+                }
+
+            allowed, reason = check_guardrails(action_type, target, step.get("url", ""))
+            if not allowed:
+                browser.close()
+                return {
+                    "success": False,
+                    "outputs": outputs,
+                    "reason": "guardrail_blocked",
+                    "details": {"step_id": step["step_id"], "reason": reason},
                     "steps_executed": steps_log,
                 }
 

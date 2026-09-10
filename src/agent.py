@@ -61,7 +61,7 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
             # Check if escalating
             if action.get('action_type') == 'escalate_to_human':
                 print("\n⚠️  ESCALATING TO HUMAN")
-                event = record_event("escalate", {"reason": action.get('reason')})
+                event = record_event("escalate", {"reason": action.get('reason') or action.get('reasoning')})
                 events.append(event)
                 save_events_to_file(events)
                 browser.close()
@@ -162,10 +162,11 @@ if __name__ == "__main__":
     # Then run this
     
     print("Starting agent loop...")
-    print("Goal: Check balance for member 12345")
+    print("Goal: Withdraw money for member 12345")
     
     result = agent_loop(
-        goal="Check balance and get member name for member 12345",
+        #goal="Check balance and get member name for member 12345",
+        goal = "Withdraw money for member 12345",
         member_id="12345"
     )
     
