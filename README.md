@@ -101,7 +101,13 @@ python src/replay_engine.py evidence/artifact.json 67890
 python src/replay_engine.py evidence/artifact.json 99999
 # → Success: False, Reason: business_outcome (member not found — reported, not retried)
 ```
+### Running the tests
 
+```bash
+pytest -v
+```
+
+Nineteen unit tests covering parameter substitution, guardrails, redaction, and artifact recording. No browser or API key required.
 ---
 
 ## Project Structure
@@ -132,6 +138,12 @@ muscle-memory/
     ├── step_NNN_screenshot.png   # Per-step screenshots from discovery
     ├── artifact.json             # Recorded, parameterized artifact
     └── replay_run_<id>_<ts>.json # Replay execution logs
+├── tests/
+│   ├── conftest.py               # Puts src/ on the path, stubs the API key
+│   ├── test_replay.py
+│   ├── test_guardrails.py
+│   ├── test_redaction.py
+│   └── test_recorder.py
 ```
 
 ---
