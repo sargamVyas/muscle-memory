@@ -6,6 +6,26 @@
 
 ---
 
+> ## Read this first — design vs. what got built
+>
+> This document is the **original design**, written before implementation, and is kept as a record of the reasoning. Where the implementation diverged, **REPORT.md is authoritative.** The divergences that matter:
+>
+> | Design said | Implementation does | Why |
+> |---|---|---|
+> | 4 resolver strategies: CSS → accessibility → label → visual | 5: placeholder → button text → accessibility attrs → CSS → text match. No screenshot/visual strategy. | Placeholder and button text resolved everything on the first pages; visual wasn't needed and wasn't built. Text-match was exercised by the div-as-button results page. |
+> | Output named `savings_balance` | `balance` | Matches the key the agent loop uses internally; one name everywhere. |
+> | Hostile patterns on login, results, and action pages | Login and results hostile (nested tables, random classes, div controls). `action.html` is plain. | Results went hostile late in the build; the final page never needed it. |
+> | Four actions: type / click / navigate / escalate | Five — `extract` added | Without it, nothing captured the balance; goal completion was firing on page text before the value was read. |
+> | One checkpoint rule (URL change) | Per action type: type → field read-back, click → URL change, extract → value present | The single rule made every `type` step fail by design and burned the retry budget. |
+> | Goal achieved when balance text appears on page | Goal achieved when `extracted_data` holds the contract's outputs | Page-text presence fired before the agent got a turn to extract. |
+> | Redact balance / member_id by truncation | Full `[REDACTED]` mask, applied to form values, visible text, and the "already collected" summary — one `REDACTION_LIST` | Truncation still leaks. The balance never enters the LLM context; the `extract` action reads the raw page. |
+> | Escalation: design only | Pause with event checkpoint + screenshot; operator `resume` / `abort`; `HEADLESS` flag for takeover. Routed from both DECIDE (LLM refuses) and HANDLE (retries exhausted). | — |
+> | Allowlist: design only | `BLOCKED_ACTION_KEYWORDS` + `ALLOWED_DOMAINS` in `config.py`, enforced in `act_on_page` and the replay loop, plus a prompt rule | Both layers evidenced — see REPORT.md §2. |
+> | Artifact records the full 4-signal target | Human-readable `target` + `strategy_used`; resolver re-runs at replay | Simpler, and drift-tolerant by construction. |
+> | Replay: separate implementation | Imports the same `act_*` / `checkpoint` functions discovery used | Guarantees a step verified in discovery executes identically in replay. |
+>
+> Not in the original design at all: the "Already collected" line in the prompt (without it the agent re-extracts the same field forever), and business-outcome detection in replay (`member_not_found` vs. technical failure).
+
 # Day 1: Architecture Decisions
 
 ## Decision 1: Target Application
