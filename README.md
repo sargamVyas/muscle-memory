@@ -149,13 +149,13 @@ See **DESIGN_NOTES.md** for:
 
 ## Key Features
 
-✅ **Hostile HTML target** — nested-table layout, no IDs, randomized class names (login page)
-✅ **Multi-signal element resolver** — placeholder → button text → accessibility attributes → CSS → text match, in priority order
-✅ **LLM-driven discovery** — 7-phase loop with per-action-type checkpoints and bounded retry
-✅ **Typed, parameterized artifact** — contract (inputs/outputs), ordered steps, checkpoints, `{member_id}` placeholders
-✅ **Deterministic replay** — same artifact, unseen member ID, zero LLM calls (verified: member 67890)
-✅ **Business-outcome handling** — member-not-found detected and reported distinctly from technical failure (verified: member 99999)
-✅ **Redaction** — sensitive form values redacted before reaching the LLM; passwords never captured
+**Hostile HTML target** — nested-table layout, no IDs, randomized class names, div-as-button controls (login + results pages)
+**Multi-signal element resolver** — placeholder → button text → accessibility attributes → CSS → text match, in priority order
+**LLM-driven discovery** — 7-phase loop with per-action-type checkpoints and bounded retry
+**Typed, parameterized artifact** — contract (inputs/outputs), ordered steps, checkpoints, `{member_id}` placeholders
+**Deterministic replay** — same artifact, unseen member ID, zero LLM calls (verified: member 67890)
+**Business-outcome handling** — member-not-found detected and reported distinctly from technical failure (verified: member 99999)
+**Redaction** — sensitive form values redacted before reaching the LLM; passwords never captured
 🔲 **Action allowlist** — block withdraw/transfer-type actions — *in progress*
 🔲 **Human escalation** — pause / operator takeover / resume — *in progress*
 

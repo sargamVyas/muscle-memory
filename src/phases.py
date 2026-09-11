@@ -339,25 +339,17 @@ def find_element(page, target_description: str) -> tuple:
         pass
     
     # Strategy 3: Find by accessibility attributes
+        # Strategy 3: Accessibility attributes (aria-label / role) — only elements that carry them
     try:
-        all_elements = page.query_selector_all('*')
-        for elem in all_elements:
-            try:
-                # Check aria-label
-                aria_label = (elem.get_attribute('aria-label') or '').lower()
-                if aria_label:
-                    for keyword in key_words:
-                        if keyword in aria_label:
-                            return (elem, 'accessibility_label')
-                
-                # Check accessible name
-                accessible_name = (elem.text_content().strip() or '').lower()
-                if accessible_name:
-                    for keyword in key_words:
-                        if keyword in accessible_name:
-                            return (elem, 'accessibility_name')
-            except:
-                pass
+        for elem in page.query_selector_all('[aria-label], [role]'):
+            aria_label = (elem.get_attribute('aria-label') or '').lower()
+            role = (elem.get_attribute('role') or '').lower()
+            text = elem.text_content().strip().lower()
+            if aria_label and any(kw in aria_label for kw in key_words):
+                return (elem, 'accessibility_label')
+            if role in ('button', 'link', 'textbox') and text and any(kw in text for kw in key_words):
+                return (elem, 'accessibility_role')
+        
     except:
         pass
     
@@ -371,18 +363,16 @@ def find_element(page, target_description: str) -> tuple:
         pass
     
     # Strategy 5: Find by visible text (last resort)
+        # Strategy 5: Visible-text match across anything clickable, including non-semantic divs
     try:
-        all_inputs = page.query_selector_all('input, button, a')
-        for elem in all_inputs:
+        for elem in page.query_selector_all('input, button, a, [onclick], [role="button"]'):
             text = elem.text_content().strip().lower()
             placeholder = (elem.get_attribute('placeholder') or '').lower()
-            combined = f"{text} {placeholder}".lower()
-            
-            if any(keyword in combined for keyword in key_words):
+            combined = f"{text} {placeholder}".strip()
+            if combined and any(kw in combined for kw in key_words):
                 return (elem, 'text_match')
     except:
         pass
-    
     return (None, 'none')
 
 def act_extract(page, target_description: str) -> dict:

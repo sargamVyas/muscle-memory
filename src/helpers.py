@@ -150,6 +150,16 @@ def extract_interactive_elements(page) -> list:
                 "placeholder": placeholder,
                 "selector": get_selector(input_elem)
             })
+
+        # Non-semantic clickables (divs/spans with onclick) — hostile pages use these instead of buttons
+        clickables = page.query_selector_all('[onclick]:not(button):not(a)')
+        for el in clickables:
+            text = el.text_content().strip()
+            elements.append({
+                "type": "clickable",
+                "text": text,
+                "selector": get_selector(el)
+            })
     
     except Exception as e:
         print(f"Error extracting interactive elements: {e}")
@@ -200,7 +210,8 @@ def format_interactive_elements(elements: list) -> str:
             lines.append(f"  {i}. Link: '{elem['text']}' (href: {elem.get('href', '#')})")
         elif elem['type'] == 'input':
             lines.append(f"  {i}. Input field: '{elem.get('placeholder', 'No placeholder')}'")
-    
+        elif elem['type'] == 'clickable':
+            lines.append(f"  {i}. Clickable: '{elem['text']}'")
     return "\n".join(lines)
 
 

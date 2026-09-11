@@ -6,13 +6,24 @@
 </head>
 <body>
     <h1>Member Details</h1>
-    <p>Member ID: {{ member_id }}</p>
-    <p>Name: {{ member.name }}</p>
-    
-    <form method="POST" action="/action">
-        <input type="hidden" name="member_id" value="{{ member_id }}">
-        <button type="submit" name="action" value="check_balance">Check Balance</button>
-        <button type="submit" name="action" value="withdraw">Withdraw</button>
-    </form>
+
+    <!-- HOSTILE: table layout, random classes, divs acting as buttons, no IDs -->
+    <table border="1" cellpadding="15">
+        <tr>
+            <td class="panel_k3j9d">
+                <table>
+                    <tr><td class="row_a1x">Member ID: {{ member_id }}</td></tr>
+                    <tr><td class="row_b2y">Name: {{ member.name }}</td></tr>
+                </table>
+
+                <form method="POST" action="/action">
+                    <input type="hidden" name="member_id" value="{{ member_id }}">
+                    <input type="hidden" name="action" value="">
+                    <div class="btn_x7f2a" onclick="var f=this.closest('form'); f.querySelector('[name=action]').value='check_balance'; f.submit();">Check Balance</div>
+                    <div class="btn_q9m1z" onclick="var f=this.closest('form'); f.querySelector('[name=action]').value='withdraw'; f.submit();">Withdraw</div>
+                </form>
+            </td>
+        </tr>
+    </table>
 </body>
 </html>

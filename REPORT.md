@@ -22,7 +22,7 @@ The replay engine imports the exact same `act_type` / `act_click` / `act_extract
 
 **Filtered observation, not screenshots or the full DOM.** Claude sees form fields (with current values), visible text, interactive elements, and a list of what's already been collected. Fewer tokens, easier to redact, and the "already collected" line turned out to be load-bearing: without it, Claude has no memory across steps and will re-extract the same field forever.
 
-**Human-readable targets + a multi-signal resolver, re-run at replay.** The artifact says `"target": "Check Balance"`, not a CSS path. `find_element` tries, in order: placeholder text → button text → accessibility attributes → CSS selector → visible-text match. Replay calls the same resolver, so a class-name change on the hostile page doesn't break the artifact. The artifact records which strategy won per step (`strategy_used`), which is how I know only two of the five strategies were ever needed on this mock (see §5).
+**Human-readable targets + a multi-signal resolver, re-run at replay.** The artifact says `"target": "Check Balance"`, not a CSS path. `find_element` tries, in order: placeholder text → button text → accessibility attributes → CSS selector → visible-text match. Replay calls the same resolver, so a class-name change on the hostile page doesn't break the artifact. The artifact records which strategy won per step (strategy_used). On the final mock, the "Check Balance" control is a <div> with an onclick — no <button>, no role, no aria-label — so that step fell through placeholder, button-text, accessibility, and CSS before text_match resolved it. The other four steps resolved on the first or second strategy.
 
 **Checkpoints are per action type, not one rule.** `type` is verified by reading the field back; `click` by URL change; `extract` by the value being present. My first version required a URL change for every action, which made every `type` step "fail" by design and burn the retry budget — it worked on a one-field form and would have broken on the first two-field form. This is the bug I'm most glad I caught before building replay on top of it.
 
@@ -55,8 +55,7 @@ The recorder keeps only steps where both the act and the checkpoint succeeded, s
 | Hidden input matched every click target | `'' in "check balance"` is `True` — empty placeholder is a substring of anything | Guard the substring fallback on non-empty |
 | Name extraction silently failed on one page | `results.html` said `Name:`, `action.html` said `Member:` | Consistent labels; the regex was fine |
 | Replay failed at step 1 | `{member_id}` substituted for the action but not for the checkpoint's expected value | Substitute once, up front |
-| Claude clicked Search on an empty field | Redaction turned `Member ID Search` into `Member ID [REDACTED]` — Claude read that as a pre-filled field | Require a separator + word boundaries; only mask real values |
-| Claude escalated instead of extracting | Saw `Balance: [REDACTED]`, reasoned it couldn't extract a placeholder | Tell it redacted values are present and extractable |
+| Claude clicked Search on an empty field | Redaction turned `Member ID Search` into `Member ID [REDACTED]` — Claude read that as a pre-filled field | Require a separator + word boundaries; only mask real values | Claude escalated instead of extracting | Saw `Balance: [REDACTED]`, reasoned it couldn't extract a placeholder | Tell it redacted values are present and extractable | | Resolver would have matched <html> for any div target | Strategy 3 walked every node and matched on text_content, so the outermost container won | Strategy 3 now only considers elements with aria-label/role; Strategy 5 covers [onclick] |
 
 The last two are the ones I'd flag to anyone building this: **redaction that changes what a page looks like changes what the agent does.** A hidden value has to stay recognizably a value, and the agent has to know the difference between "hidden from you" and "not there."
 
@@ -64,7 +63,7 @@ The replay bug was caught by the checkpoint, not by me — the field read back `
 
 ## 5. Known limitations — honest version
 
-- **Only the login page is truly hostile** (nested tables, randomized classes). Results and action pages are clean HTML. Consequence: every element resolved via placeholder or button text; the accessibility, CSS, and text-match strategies exist but were never needed. The resolver is designed for the hard case; this mock didn't force it.
+- The action-result page (action.html) is still clean HTML. Login and results pages are hostile (nested tables, randomized classes, div-as-button). Extraction on the final page therefore never had to cope with a hostile layout.
 - **Guardrails match on labels.** A UI that labels the withdraw button "Proceed" evades the keyword list. The stronger version classifies by *effect* — e.g. a POST to a state-changing endpoint — not by button text.
 - **Resolver strategy 3 walks every DOM node** (`query_selector_all('*')`) and can match an outer container that merely contains the keyword. Never triggered here; would need scoping on a large page.
 - **Goal parsing is substring matching** (`"check balance" in goal`). A differently-phrased goal wouldn't trigger completion. The right fix is driving completion from the contract's required outputs, not the goal text.
@@ -82,11 +81,10 @@ Drift is detected, not prevented: if the UI changes and a step's checkpoint fail
 
 ## 7. What I'd do next, in order
 
-1. Make the action page use `<div>`s instead of `<button>`s so the text-match fallback is exercised, not just implemented.
-2. Drive `should_stop` from the contract's required outputs instead of goal text.
-3. Effect-based guardrails (inspect the form action / HTTP method, not the label).
-4. Screenshot-on-failure and structured logs, separate from the event JSON.
-5. Screenshot + coordinates as a resolver strategy, and one test against an iframe.
+1. Drive `should_stop` from the contract's required outputs instead of goal text.
+2. Effect-based guardrails (inspect the form action / HTTP method, not the label).
+3. Screenshot-on-failure and structured logs, separate from the event JSON.
+4. Screenshot + coordinates as a resolver strategy, and one test against an iframe.
 
 ---
 
