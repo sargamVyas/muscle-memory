@@ -1,12 +1,14 @@
 # src/phases.py
 
 import json
+import re
+import time
+import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 from anthropic import Anthropic
 from urllib.parse import urlparse
 from config import REDACTION_LIST, EVIDENCE_DIR, BLOCKED_ACTION_KEYWORDS, ALLOWED_DOMAINS
-from config import REDACTION_LIST, EVIDENCE_DIR
 from helpers import (
     extract_form_fields,
     extract_visible_text,
@@ -222,7 +224,7 @@ def check_guardrails(action_type: str, target: str = "", url: str = "") -> tuple
 
     return (True, "allowed")
 
-    # ========== PHASE 3: ACT ==========
+# ========== PHASE 3: ACT ==========
 
 def act_on_page(page, action: dict) -> dict:
     """

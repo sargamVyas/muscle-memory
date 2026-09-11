@@ -1,15 +1,8 @@
 # src/agent.py
 
-import json
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from anthropic import Anthropic
 from config import EVIDENCE_DIR, HEADLESS
-from phases import observe_page, decide_action
-from helpers import parse_claude_response
-
-# Initialize Anthropic client
-client = Anthropic()
 
 # Create evidence directory if it doesn't exist
 Path(EVIDENCE_DIR).mkdir(exist_ok=True)
@@ -73,7 +66,7 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
                 step_count += 1
                 continue
 
-            # Printing to see what cl;asause is seeing after login
+            # What Claude was shown, and what it chose — useful when a decision looks wrong
             print("\n[DEBUG] Claude saw:")
             print(f"  Form fields: {observation['form_fields']}")
             print(f"  Interactive elements: {observation['interactive_elements']}")
@@ -185,4 +178,4 @@ if __name__ == "__main__":
     print("="*60)
     print(f"Success: {result['success']}")
     print(f"Reason: {result.get('reason', 'N/A')}")
-    print(f"Total steps: {len(result['events'])}")
+    print(f"Total events: {len(result['events'])}")

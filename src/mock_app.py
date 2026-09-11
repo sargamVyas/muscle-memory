@@ -56,4 +56,4 @@ def action():
 
 if __name__ == '__main__':
     print("Starting mock banking app on http://localhost:8000")
-    app.run(debug=True, port=8000)
+    app.run(debug=False, port=8000)
