@@ -22,7 +22,20 @@ def find_extract_value(page, target_description: str):
         return match.group(1).strip() if match else None
     except Exception:
         return None
-    
+
+
+def redact_text(text: str) -> str:
+    """
+    Mask values that follow a sensitive label in free text, keeping the label
+    so the LLM knows the field exists without ever seeing the value.
+    'Balance: $1500.0' → 'Balance: [REDACTED]'
+    """
+    for kw in REDACTION_LIST:
+        label = kw.replace('_', r'[ _]?')   # 'member_id' also matches 'Member ID'
+        text = re.sub(rf'(\b{label}\b\s*[:\-]\s*)\S+', r'\1[REDACTED]', text, flags=re.IGNORECASE)
+    return text
+
+
 def redact_value(field_name: str, value: str) -> str:
     """
     Redact sensitive values based on field name.
@@ -89,6 +102,7 @@ def extract_visible_text(page) -> str:
             text = body.text_content()
             # Clean up whitespace
             text = ' '.join(text.split())
+            text = redact_text(text)
             # Limit to first 500 chars (don't overwhelm Claude)
             return text[:500]
     except Exception as e:

@@ -84,6 +84,7 @@ def build_artifact(
             "step_id": len(steps_out) + 1,
             "action": action_type,
             "target": decide.get("target", ""),
+            "strategy_used": act.get("strategy_used"),
             "checkpoint": checkpoint.get("reason", ""),
         }
 

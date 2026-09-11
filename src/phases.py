@@ -14,7 +14,8 @@ from helpers import (
     format_form_fields,
     format_interactive_elements,
     parse_claude_response,
-    find_extract_value 
+    find_extract_value,
+    redact_value
 )
 
 # Load .env file
@@ -47,6 +48,10 @@ ACTION TYPES:
 SAFETY RULES:
 - You may NOT withdraw, transfer, delete, or close accounts. These actions are blocked.
 - If the goal requires a blocked action, respond with escalate_to_human instead of attempting it.
+
+PRIVACY:
+- Some values are shown to you as [REDACTED]. They ARE present on the page — they are hidden from you for privacy, not missing.
+- The extract action reads the real value directly from the page. If you see a label you need like "Balance: [REDACTED]", EXTRACT it. Never escalate just because a value appears redacted.
 
 EXAMPLE SCENARIOS:
 Scenario 1: Field is empty, Search button visible
@@ -160,7 +165,7 @@ def decide_action(goal: str, observation: dict, extracted_data: dict = None) -> 
         form_fields_str = format_form_fields(observation['form_fields'])
         interactive_str = format_interactive_elements(observation['interactive_elements'])
 
-        collected_str = ", ".join(f"{k}={v}" for k, v in extracted_data.items()) or "nothing yet"
+        collected_str = ", ".join(f"{k}={redact_value(k, v)}" for k, v in extracted_data.items()) or "nothing yet"
 
         extra_instruction = ""
         for field in observation['form_fields']:

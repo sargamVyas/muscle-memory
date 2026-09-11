@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 from anthropic import Anthropic
-from config import EVIDENCE_DIR
 from config import EVIDENCE_DIR, HEADLESS
 from phases import observe_page, decide_action
 from helpers import parse_claude_response
@@ -21,7 +20,7 @@ def agent_loop(goal: str, member_id: str, max_steps: int = 20):
     """
     Main agent loop: orchestrates all 7 phases.
     """
-    
+    goal = goal.format(member_id=member_id)
     from phases import (
         observe_page, decide_action, act_on_page, 
         checkpoint, handle_result, should_stop,
@@ -174,14 +173,12 @@ if __name__ == "__main__":
     # Start mock app first: python src/mock_app.py
     # Then run this
     
+    member_id = "12345"
+    goal = "Check balance and get member name for member {member_id}"
+
     print("Starting agent loop...")
-    print("Goal: Withdraw money for member 12345")
-    
-    result = agent_loop(
-        #goal="Check balance and get member name for member 12345",
-        goal = "Withdraw money for member 12345",
-        member_id="12345"
-    )
+    print(f"Goal: {goal}  (member_id={member_id})")
+    result = agent_loop(goal=goal, member_id=member_id)
     
     print("\n" + "="*60)
     print("AGENT LOOP FINISHED")
